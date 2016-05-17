@@ -1,5 +1,6 @@
 #import <ObjFW/ObjFW.h>
 #import "DrMinGWModule.h"
+#import "DrMinGWModule+PRIVATE.h"
 
 static HINSTANCE dllMgwhelp = NULL;
 static HINSTANCE dllPsapi = NULL;
@@ -39,11 +40,18 @@ static bool __drmingw_module_loaded = false;
 			if (NULL == dllMgwhelp)
 				dllMgwhelp = LoadLibraryA("mgwhelp.dll");
 
+			if (NULL == dllMgwhelp) {
+				of_log(@"Loading %s error", "mgwhelp.dll");
+				return;
+			}
+
 			if (NULL == dllPsapi)
 				dllPsapi = LoadLibraryA("psapi.dll");
 
-			if (NULL == dllMgwhelp && NULL == dllPsapi)
-				@throw [OFInitializationFailedException exceptionWithClass:[DrMinGWModule class]];
+			if (NULL == dllPsapi) {
+				of_log(@"Loading %s error", "psapi.dll");
+				return;
+			}
 
 			DrMinGwSymInitializePtr = (DrMinGwSymInitialize)GetProcAddress(dllMgwhelp, "SymInitialize");
 			DrMinGwStackWalk64Ptr = (DrMinGwStackWalk64)GetProcAddress(dllMgwhelp, "StackWalk64");
@@ -57,16 +65,16 @@ static bool __drmingw_module_loaded = false;
 			DrMinGwGetModuleFileNameExPtr = (DrMinGwGetModuleFileNameExW)GetProcAddress(dllPsapi, "GetModuleFileNameExW");
 
 			if (
-				DrMinGwSymInitializePtr == NULL
-				|| DrMinGwStackWalk64Ptr == NULL
-				|| DrMinGwSymCleanupPtr == NULL
-				|| DrMinGwSymFromAddrPtr == NULL
-				|| DrMinGwSymGetModuleBase64Ptr == NULL
-				|| DrMinGwSymFunctionTableAccess64Ptr == NULL
-				|| DrMinGwUnDecorateSymbolNamePtr == NULL
-				|| DrMinGwSymGetLineFromAddr64Ptr == NULL
-				|| DrMinGwSymSetOptionsPtr == NULL
-				|| DrMinGwGetModuleFileNameExPtr == NULL
+				!(DrMinGwSymInitializePtr != NULL
+				&& DrMinGwStackWalk64Ptr != NULL
+				&& DrMinGwSymCleanupPtr != NULL
+				&& DrMinGwSymFromAddrPtr != NULL
+				&& DrMinGwSymGetModuleBase64Ptr != NULL
+				&& DrMinGwSymFunctionTableAccess64Ptr != NULL
+				&& DrMinGwUnDecorateSymbolNamePtr != NULL
+				&& DrMinGwSymGetLineFromAddr64Ptr != NULL
+				&& DrMinGwSymSetOptionsPtr != NULL
+				&& DrMinGwGetModuleFileNameExPtr != NULL)
 				) {
 				@throw [OFInitializationFailedException exceptionWithClass:[DrMinGWModule class]];
 			}
@@ -96,9 +104,22 @@ static bool __drmingw_module_loaded = false;
 - (void)dealloc
 {
 	DrMinGwSymCleanupPtr(_process);
+
+	if (_process != NULL)
+		CloseHandle(_process);
+
+	if (_thread != NULL)
+		CloseHandle(_thread);
+
 	[_backtrace release];
 
 	[super dealloc];
+}
+
++ (void)unload
+{
+	FreeLibrary(dllMgwhelp);
+	FreeLibrary(dllPsapi);
 }
 
 - (instancetype)initWithContext:(PCONTEXT)ctx
@@ -158,30 +179,26 @@ static bool __drmingw_module_loaded = false;
 	return [[[self alloc] init] autorelease];
 }
 
++ (instancetype)moduleWithContext:(PCONTEXT)ctx
+{
+	return [[[self alloc] initWithContext:ctx] autorelease];
+}
+
 + (bool)loaded
 {
 	return __drmingw_module_loaded;
 }
 
-- (OFString *)symbolFromAddress:(DWORD64)Address
+- (OFString *)symbolNameFromAddress:(DWORD64)Address
 {
-	static size_t idx = 0;
-
-	OFMutableString* str = [OFMutableString string];
 
 	DWORD64 displacement = 0;
 
 	if (DrMinGwSymFromAddrPtr(_process, Address, &displacement, _symbol)) {
-		[str appendFormat:@"[%i] %s [0x%0llX]", idx, _symbol->Name, Address];
-	} else {
-		[str appendFormat:@"[%i] ??? [0x%0llX]", idx, Address];
+		return [OFString stringWithUTF8String:_symbol->Name];
 	}
 
-	idx++;
-
-	[str makeImmutable];
-
-	return str;
+	return nil;
 
 }
 
@@ -199,14 +216,15 @@ static bool __drmingw_module_loaded = false;
 	char buffer[symbolSize];
 
 	memset(buffer, 0, symbolSize);
+	size_t idx = 0;
 
 	while([self stackWalk]) {
-		_symbol = (PSYMBOL_INFO)buffer;
 
-		_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-    	_symbol->MaxNameLen = MAX_SYM_NAME;
+		[self setSymbol:(PSYMBOL_INFO)buffer];
 
-    	[array addObject:[self symbolFromAddress:_stackframe.AddrPC.Offset]];
+    	OFString* symbolName = [self symbolNameFromAddress:_stackframe.AddrPC.Offset];
+
+    	[array addObject:[OFString stringWithFormat:@"[%i] %@ [0x%0llX]", idx, (symbolName != nil) ? symbolName : @"???", _stackframe.AddrPC.Offset]];
 
     	[pool releaseObjects];
 
@@ -216,6 +234,7 @@ static bool __drmingw_module_loaded = false;
     		break;
 
     	memset(buffer, 0, symbolSize);
+    	idx++;
 	}
 
 	[pool release];
@@ -232,6 +251,48 @@ static bool __drmingw_module_loaded = false;
 	BOOL ret = DrMinGwStackWalk64Ptr(_image, _process, _thread, &_stackframe, &_context, NULL, DrMinGwSymFunctionTableAccess64Ptr, DrMinGwSymGetModuleBase64Ptr, NULL);
 
 	return ret ? true : false;
+}
+
+- (OFString *)moduleFileNameFromHandle:(HMODULE)moduleHandle
+{
+	wchar_t buffer[MAX_PATH];
+	size_t bufferSize = MAX_PATH * sizeof(wchar_t);
+
+	DWORD ret = DrMinGwGetModuleFileNameExPtr(_process, moduleHandle, buffer, bufferSize);
+
+	if (ret > 0)
+		return [OFString stringWithUTF16String:(const of_char16_t *)buffer length:(size_t)ret];
+	
+	
+	return [OFString stringWithUTF8String:"Unknown"];
+}
+
+- (HMODULE)moduleHandleFromAddress:(DWORD64)address
+{
+	return (HMODULE)(INT_PTR)DrMinGwSymGetModuleBase64Ptr(_process, address);
+}
+
+- (void)setProcessHandle:(HANDLE)process
+{
+	if (_process != NULL)
+		CloseHandle(_process);
+
+	_process = process;
+}
+
+- (void)setThreadHandle:(HANDLE)thread
+{
+	if (_thread != NULL)
+		CloseHandle(_thread);
+
+	_thread = thread;
+}
+
+- (void)setSymbol:(PSYMBOL_INFO)symbol
+{
+	_symbol = symbol;
+	_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    _symbol->MaxNameLen = MAX_SYM_NAME;
 }
 
 @end

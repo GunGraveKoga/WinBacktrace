@@ -19,11 +19,14 @@
 }
 
 + (instancetype)module;
++ (instancetype)moduleWithContext:(PCONTEXT)ctx;
 + (bool)loaded;
 
 - (instancetype)initWithContext:(PCONTEXT)ctx;
 - (void)setContext:(PCONTEXT)ctx;
-- (OFString *)symbolFromAddress:(DWORD64)Address;
+- (OFString *)symbolNameFromAddress:(DWORD64)Address;
+- (OFString *)moduleFileNameFromHandle:(HMODULE)moduleHandle;
+- (HMODULE)moduleHandleFromAddress:(DWORD64)address;
 - (OFArray *)backtraceStackWithDepth:(size_t)depth;
 - (bool)stackWalk;
 
