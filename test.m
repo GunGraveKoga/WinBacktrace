@@ -9,6 +9,7 @@
 - (void)OF__internalMethod;
 + (void)classMethod;
 - (void)incorrectMethodDemangle__;
+- (void)CRTException;
 
 @end
 
@@ -39,11 +40,20 @@
 	@throw [OFException exception];
 }
 
+- (void)CRTException
+{
+	int i = 1;
+  	i = i / 0;
+}
+
 @end;
 
 
 int main(int argc, char const *argv[])
 {
+	SetUnhandledExceptionFilter(__WinBacktrace_Exception_Filter);
+	objc_setUncaughtExceptionHandler(__WinBacktrace_Uncaught_Exception_Handler);
+
 	OFObject* obj = [OFObject new];
 
 	@try {
@@ -85,6 +95,8 @@ int main(int argc, char const *argv[])
 	}@catch(OFException* e) {
 		[e printDebugBacktrace];
 	}
+
+	[obj CRTException];
 
 
 	return 0;

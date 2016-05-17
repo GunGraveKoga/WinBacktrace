@@ -116,6 +116,20 @@ static bool __dynamorio_module_loaded = false;
 	return self;
 }
 
+- (instancetype)initWithContext:(PCONTEXT)ctx
+{
+	self = [super init];
+
+	[self setContext:ctx];
+
+	return self;
+}
+
++ (instancetype)moduleWithContext:(PCONTEXT)ctx
+{
+	return [[[self alloc] initWithContext:ctx] autorelease];
+}
+
 - (OFArray *)backtraceWithStack:(void *[])stack depth:(size_t)depth
 {
 	if (_backtrace != nil)
@@ -285,5 +299,34 @@ static bool __dynamorio_module_loaded = false;
 	return nil;
 }
 
+- (OFArray *)callectStackWithDepth:(size_t)depth
+{
+	
+	OFMutableArray* stack = [OFMutableArray new];
+	OFAutoreleasePool* pool = [OFAutoreleasePool new];
+
+	OFNumber* ptr = nil;
+
+	while([self stackWalk]) {
+
+		ptr = [OFNumber numberWithUIntPtr:(uintptr_t)_stackframe.AddrPC.Offset];
+
+		[stack addObject:ptr];
+
+		depth--;
+
+		if (depth <= 0)
+			break;
+
+		[pool releaseObjects];
+
+	}
+
+	[pool release];
+
+	[stack makeImmutable];
+
+	return stack;
+}
 
 @end

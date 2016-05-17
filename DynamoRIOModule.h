@@ -35,5 +35,6 @@ WINBACKTRACE_EXPORT OFString *const kSymbolEndOffset;
 
 - (OFArray *)backtraceWithStack:(void *[])stack depth:(size_t)depth;
 - (OFDictionary *)symbolInfoByName:(OFString *)name inModule:(OFString *)module;
+- (OFArray *)callectStackWithDepth:(size_t)depth;
 
 @end
