@@ -207,7 +207,7 @@ static bool __drmingw_module_loaded = false;
 	if (_backtrace != nil)
 		return [[_backtrace retain] autorelease];
 
-	OFMutableArray* array = [OFMutableArray arrayWithCapacity:depth];
+	OFMutableArray* array = [[OFMutableArray alloc] initWithCapacity:depth];
 
 	OFAutoreleasePool* pool = [OFAutoreleasePool new];
 

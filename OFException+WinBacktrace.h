@@ -5,6 +5,7 @@
 
 @interface OFException(WinBacktrace)
 
-- (OFArray *)debugBacktrace;
+- (void)printDebugBacktrace;
+- (OFArray *)backtraceInfo;
 
 @end
