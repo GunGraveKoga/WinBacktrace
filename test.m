@@ -1,6 +1,6 @@
 #import <ObjFW/ObjFW.h>
-#import "OFException+WinBacktrace.h"
-#import "DynamoRIOModule.h"
+#import "WinBacktrace.h"
+
 
 @interface OFObject(TEST)
 
@@ -51,7 +51,11 @@
 
 int main(int argc, char const *argv[])
 {
-	[OFException enablePostmortemDebug:true];
+	//[OFException(WinBacktrace) enablePostmortemDebug:true];
+	//[OFException printFullCallStack:true];
+
+	WinBacktrace* plugin = [OFPlugin pluginFromFile:@"WinBacktrace"];
+
 	
 	OFObject* obj = [OFObject new];
 
@@ -95,9 +99,9 @@ int main(int argc, char const *argv[])
 		[e printDebugBacktrace];
 	}
 
-	[obj CRTException];
+	//[obj CRTException];
 
-	of_log(@"After exception");
+	//of_log(@"After exception");
 
 	@throw [OFException exception];
 

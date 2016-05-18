@@ -13,7 +13,6 @@ static bool __winbacktrace_print_full_call_stack = false;
 @interface OFException(DebugPrint)
 
 - (void)printDebugInfo:(OFDictionary *)info number:(size_t)number;
-- (OFString *)stringFromDebugInfo:(OFDictionary *)info;
 
 @end
 
@@ -129,31 +128,70 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
 void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
-	[of_stderr writeLine:[exception description]];
-	[exception printDebugBacktrace];
+	wchar_t path[1024];
+	OFConstantString* dateFormat = @"%A %d %B %Y %H:%M:%S";
 
-	if (__winbacktrace_postmortem_debug_enabled) {
+	DWORD length = GetModuleFileNameW(NULL, path, 1024);
+	OFString* executablePath = [OFString stringWithUTF16String:path length:(size_t)length];
+	OFString* executableDir = [executablePath stringByDeletingLastPathComponent];
+	OFString* executableName = [executablePath lastPathComponent];
+	OFString* backtraceLogFile = [executableDir stringByAppendingPathComponent:[OFString stringWithFormat:@"%@_backtrace.log", [executableName stringByDeletingPathExtension]]];
+
+	OFFile* backtrace = [OFFile fileWithPath:[backtraceLogFile stringByStandardizingPath] mode:@"a+"];
+
+	[of_stderr writeLine:[exception description]];
+	
+	[backtrace writeFormat:@"%@ %@ GMT+0:\n\n", executableName, [[OFDate date] dateStringWithFormat:dateFormat]];
+	[backtrace writeString:@"========================START=========================\n\n"];
+	[backtrace writeFormat:@"PID %d TID 0x%llx <%@>\n\n", GetCurrentProcessId(), GetCurrentThreadId(), [[OFThread currentThread] name]];
+	[backtrace writeLine:[exception description]];
+	[backtrace writeString:@"\n\n"];
+	[of_stderr writeString:@"\r\n\r\n"];
+	OFArray* stackInfo = [exception backtraceInfo];
+
+	size_t idx = 0;
+	for (OFDictionary* info in stackInfo) {
+		[exception printDebugInfo:info  number:idx];
+
+		[backtrace writeFormat:@"%zu %@\n", idx, [exception stringFromDebugInfo:info]];
+
+		idx++;
+	}
+	[of_stderr writeString:@"\r\n\r\n"];
+	[backtrace writeString:@"\n\n"];
+
+	if (__winbacktrace_print_full_call_stack) {
 		if ([DrMinGWModule loaded]) {
+
+			[backtrace writeString:@"Stack:\n\n"];
+
+			OFArray* stack = nil;
 
 			if ([DynamoRIOModule loaded]) {
 				DynamoRIOModule* module = [DynamoRIOModule moduleWithContext:NULL];
 
-				OFArray* stack = [module backtraceStackWithDepth:256];
-				
-				OFException* hlp = [OFException exception];
+				stack = [module backtraceStackWithDepth:256];
 
-				for (OFDictionary* i in stack){
-					[of_stderr writeLine:[hlp stringFromDebugInfo:i]];
-				}
+			} else {
+				DrMinGWModule* module = [DrMinGWModule moduleWithContext:NULL];
 
+				stack = [module backtraceStackWithDepth:256];
+			}
+			idx = 0;
+			for (OFDictionary* i in stack){
+				[backtrace writeLine:[OFString stringWithFormat:@"%zu %@", idx, [exception stringFromDebugInfo:i]]];
+				idx++;
 			}
 		}
 	}
 
+	[backtrace writeString:@"========================END=========================\n\n"];
+	[backtrace close];
+
 	abort();
 }
 
-@implementation OFException(WinBacktrace)
+@implementation OFException (WinBacktrace)
 
 + (void)enablePostmortemDebug:(bool)yes_no
 {
