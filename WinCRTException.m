@@ -1,9 +1,12 @@
 #import <ObjFW/ObjFW.h>
+#import "DrMinGWModule.h"
+#import "DrMinGWModule+PRIVATE.h"
+#import "DynamoRIOModule.h"
 #import "WinCRTException.h"
 #import "OFException+WinBacktrace.h"
 #import "WinCRTException+PRIVATE.h"
 
-static OFString* WinExceptionDescription(DWORD _exception_code) {
+OFString* WinExceptionDescription(DWORD _exception_code) {
   switch(_exception_code) {
     case EXCEPTION_ACCESS_VIOLATION:
       return [OFString stringWithUTF8String:"Access Violation"];
@@ -54,6 +57,12 @@ static OFString* WinExceptionDescription(DWORD _exception_code) {
 
 @implementation WinCRTException
 
++ (void)load
+{
+  SetUnhandledExceptionFilter(__WinBacktrace_Exception_Filter);
+  objc_setUncaughtExceptionHandler(__WinBacktrace_Uncaught_Exception_Handler);
+}
+
 - (instancetype)initWithExceptionRecord:(PEXCEPTION_RECORD)record
 {
 	self = [super init];
@@ -98,7 +107,29 @@ static OFString* WinExceptionDescription(DWORD _exception_code) {
 - (OFString *)description
 {
 	OFMutableString* desc = [OFMutableString stringWithFormat:@"WinRuntime Error 0x%04x occured at address 0x%p!", _record->ExceptionCode, _record->ExceptionAddress];
+  [desc appendFormat:@"\n%@.", WinExceptionDescription(_record->ExceptionCode)];
 
+  if (_record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        if (_record->ExceptionInformation[0] == 0)
+          [desc appendString:@"\nAttempted to read the inaccessible data!"];
+        else if (_record->ExceptionInformation[0] == 1)
+          [desc appendString:@"\nAttempted to write to an inaccessible address!"];
+        else if (_record->ExceptionInformation[0] == 8)
+          [desc appendString:@"\nDEP violation!"];
+
+      } else if (_record->ExceptionCode == EXCEPTION_IN_PAGE_ERROR) {
+        if (_record->ExceptionInformation[0] == 0)
+          [desc appendString:@"\nAttempted to read the inaccessible data!"];
+        else if (_record->ExceptionInformation[0] == 1)
+          [desc appendString:@"\nAttempted to write to an inaccessible address!"];
+        else if (_record->ExceptionInformation[0] == 8)
+          [desc appendString:@"\nDEP violation!"];
+
+      }
+
+      [desc makeImmutable];
+
+      return desc;
 
 }
 

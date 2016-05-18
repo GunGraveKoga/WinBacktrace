@@ -51,9 +51,8 @@
 
 int main(int argc, char const *argv[])
 {
-	SetUnhandledExceptionFilter(__WinBacktrace_Exception_Filter);
-	objc_setUncaughtExceptionHandler(__WinBacktrace_Uncaught_Exception_Handler);
-
+	[OFException enablePostmortemDebug:true];
+	
 	OFObject* obj = [OFObject new];
 
 	@try {
@@ -97,6 +96,10 @@ int main(int argc, char const *argv[])
 	}
 
 	[obj CRTException];
+
+	of_log(@"After exception");
+
+	@throw [OFException exception];
 
 
 	return 0;

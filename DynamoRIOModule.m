@@ -3,19 +3,6 @@
 #import "DrMinGWModule+PRIVATE.h"
 #import "objc_demangle.h"
 
-OFString *const kModuleName = @"kModuleName";
-OFString *const kModulePath = @"kModulePath";
-OFString *const kModuleAddress = @"kModuleAddress";
-OFString *const kMangledSymbolName = @"kMangledSymbolName";
-OFString *const kDemangledSymbolName = @"kDemangledSymbolName";
-OFString *const kSourceFileName = @"kSourceFileName";
-OFString *const kSourceFilePath = @"kSourceFilePath";
-OFString *const kLineNumber = @"kLineNumber";
-OFString *const kStackAddress = @"kStackAddress";
-OFString *const kModuleOffset = @"kModuleOffset";
-OFString *const kSymbolStartOffset = @"kSymbolStartOffset";
-OFString *const kSymbolEndOffset = @"kSymbolEndOffset";
-
 typedef drsym_error_t (*drsym_lookup_symbol)(const char *modpath, const char *symbol, size_t *modoffs /*OUT*/, u_int flags);
 typedef drsym_error_t (*drsym_lookup_address)(const char *modpath, size_t modoffs, drsym_info_t *info /*INOUT*/, u_int flags);
 typedef size_t (*drsym_demangle_symbol)(char *dst, size_t dst_sz, const char *mangled, u_int flags);
@@ -252,6 +239,7 @@ static bool __dynamorio_module_loaded = false;
     			OFString* file = [OFString stringWithUTF8String:_sym_info.file length:_sym_info.file_available_size];
     			[result setObject:file forKey:kSourceFilePath];
     			[result setObject:[file lastPathComponent] forKey:kSourceFileName];
+    			[result setObject:[OFNumber numberWithSize:_sym_info.line_offs] forKey:kLineOffset];
     		} else if (ret == DRSYM_ERROR_LINE_NOT_AVAILABLE) {
 
     			if (_sym_info.file_available_size > 0) {
@@ -297,36 +285,6 @@ static bool __dynamorio_module_loaded = false;
 	[pool release];
 
 	return nil;
-}
-
-- (OFArray *)callectStackWithDepth:(size_t)depth
-{
-	
-	OFMutableArray* stack = [OFMutableArray new];
-	OFAutoreleasePool* pool = [OFAutoreleasePool new];
-
-	OFNumber* ptr = nil;
-
-	while([self stackWalk]) {
-
-		ptr = [OFNumber numberWithUIntPtr:(uintptr_t)_stackframe.AddrPC.Offset];
-
-		[stack addObject:ptr];
-
-		depth--;
-
-		if (depth <= 0)
-			break;
-
-		[pool releaseObjects];
-
-	}
-
-	[pool release];
-
-	[stack makeImmutable];
-
-	return stack;
 }
 
 @end

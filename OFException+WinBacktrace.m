@@ -2,55 +2,33 @@
 #import "OFException+WinBacktrace.h"
 #import "DrMinGWModule.h"
 #import "DynamoRIOModule.h"
+#import "WinCRTException.h"
+#import "WinCRTException+PRIVATE.h"
 
-static OFString* WinExceptionCodeToString(DWORD _exception_code) {
-  switch(_exception_code) {
-    case EXCEPTION_ACCESS_VIOLATION:
-      return [OFString stringWithUTF8String:"EXCEPTION_ACCESS_VIOLATION"];
-    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
-      return [OFString stringWithUTF8String:"EXCEPTION_ARRAY_BOUNDS_EXCEEDED"];
-    case EXCEPTION_BREAKPOINT:
-      return [OFString stringWithUTF8String:"EXCEPTION_BREAKPOINT"];
-    case EXCEPTION_DATATYPE_MISALIGNMENT:
-      return [OFString stringWithUTF8String:"EXCEPTION_DATATYPE_MISALIGNMENT"];
-    case EXCEPTION_FLT_DENORMAL_OPERAND:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_DENORMAL_OPERAND"];
-    case EXCEPTION_FLT_DIVIDE_BY_ZERO:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_DIVIDE_BY_ZERO"];
-    case EXCEPTION_FLT_INEXACT_RESULT:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_INEXACT_RESULT"];
-    case EXCEPTION_FLT_INVALID_OPERATION:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_INVALID_OPERATION"];
-    case EXCEPTION_FLT_OVERFLOW:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_OVERFLOW"];
-    case EXCEPTION_FLT_STACK_CHECK:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_STACK_CHECK"];
-    case EXCEPTION_FLT_UNDERFLOW:
-      return [OFString stringWithUTF8String:"EXCEPTION_FLT_UNDERFLOW"];
-    case EXCEPTION_ILLEGAL_INSTRUCTION:
-      return [OFString stringWithUTF8String:"EXCEPTION_ILLEGAL_INSTRUCTION"];
-    case EXCEPTION_IN_PAGE_ERROR:
-      return [OFString stringWithUTF8String:"EXCEPTION_IN_PAGE_ERROR"];
-    case EXCEPTION_INT_DIVIDE_BY_ZERO:
-      return [OFString stringWithUTF8String:"EXCEPTION_INT_DIVIDE_BY_ZERO"];
-    case EXCEPTION_INT_OVERFLOW:
-      return [OFString stringWithUTF8String:"EXCEPTION_INT_OVERFLOW"];
-    case EXCEPTION_INVALID_DISPOSITION:
-      return [OFString stringWithUTF8String:"EXCEPTION_INVALID_DISPOSITION"];
-    case EXCEPTION_NONCONTINUABLE_EXCEPTION:
-      return [OFString stringWithUTF8String:"EXCEPTION_NONCONTINUABLE_EXCEPTION"];
-    case EXCEPTION_PRIV_INSTRUCTION:
-      return [OFString stringWithUTF8String:"EXCEPTION_PRIV_INSTRUCTION"];
-    case EXCEPTION_SINGLE_STEP:
-      return [OFString stringWithUTF8String:"EXCEPTION_SINGLE_STEP"];
-    case EXCEPTION_STACK_OVERFLOW:
-      return [OFString stringWithUTF8String:"EXCEPTION_STACK_OVERFLOW"];
-    default:
-      return [OFString stringWithUTF8String:"UNKNOWN"];
-  }
+#include <inttypes.h>
 
-  return nil;
-}
+static bool __winbacktrace_postmortem_debug_enabled = false;
+static bool __winbacktrace_print_full_call_stack = false;
+
+@interface OFException(DebugPrint)
+
+- (void)printDebugInfo:(OFDictionary *)info number:(size_t)number;
+- (OFString *)stringFromDebugInfo:(OFDictionary *)info;
+
+@end
+
+/* We provide control over many aspects of callstack formatting (i#290)
+ * encoded in print_flags.
+ * We put file:line in [] and absaddr <mod!offs> in ()
+ *
+ Example:
+ *  0  suppress.exe!do_uninit_read+0x27 [e:\derek\drmemory\git\src\tests\suppress.c @ 53] (0x004011d7 <suppress.exe+0x11d7>)
+ *  1  suppress.exe!uninit_test1+0xb [e:\derek\drmemory\git\src\tests\suppress.c @ 59] (0x0040119c <suppress.exe+0x119c>)
+ *  2  suppress.exe!test+0xf [e:\derek\drmemory\git\src\tests\suppress.c @ 213] (0x00401070 <suppress.exe+0x1070>)
+ *  3  suppress.exe!main+0x31 [e:\derek\drmemory\git\src\tests\suppress.c @ 247] (0x00401042 <suppress.exe+0x1042>)
+ *  4  suppress.exe!__tmainCRTStartup+0x15e [f:\sp\vctools\crt_bld\self_x86\crt\src\crt0.c @ 327] (0x00401d87 <suppress.exe+0x1d87>)
+ *  5  KERNEL32.dll!BaseProcessStart+0x27 (0x7d4e9982 <KERNEL32.dll+0x29982>)
+ */
 
 LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
@@ -59,11 +37,14 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
     void* pool = objc_autoreleasePoolPush();
 
-    OFException* WinRTException = [OFException exception];
+    WinCRTException* WinRTException = [WinCRTException exceptionWithExceptionRecord:ExceptionRecord];
 
     if ([DrMinGWModule loaded] && [DynamoRIOModule loaded]) {
 
     	DynamoRIOModule* module = [DynamoRIOModule moduleWithContext:ContextRecord];
+
+    	if (__winbacktrace_postmortem_debug_enabled)
+    		[module miniDump:info];
 
 		OFArray* stack = [module callectStackWithDepth:OF_BACKTRACE_SIZE];
 
@@ -88,9 +69,38 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
     	@throw [WinRTException autorelease];
 
 
+    } else if ([DrMinGWModule loaded]) {
+
+    	DrMinGWModule* module = [DrMinGWModule moduleWithContext:ContextRecord];
+
+    	if (__winbacktrace_postmortem_debug_enabled)
+    		[module miniDump:info];
+
+    	OFArray* stack = [module callectStackWithDepth:OF_BACKTRACE_SIZE];
+
+		size_t depth = [stack count];
+
+    	void* _stack[depth];
+
+    	memset(_stack, 0, (sizeof(void*) * depth));
+
+    	for (size_t idx = 0; idx < depth; idx++) {
+
+    		_stack[idx] = (void*)[[stack objectAtIndex:idx] uIntPtrValue];
+
+    	}
+
+    	[WinRTException setBackTrace:_stack count:depth];
+
+    	[WinRTException retain];
+
+    	objc_autoreleasePoolPop(pool);
+
+    	@throw [WinRTException autorelease];
+
     } else {
 
-    	[of_stderr writeFormat:@"Runtime Error %@ was occured at address 0x%p\r\n", WinExceptionCodeToString(ExceptionRecord->ExceptionCode), ExceptionRecord->ExceptionAddress];
+    	[of_stderr writeFormat:@"Runtime Error 0x%04x %@ was occured at address 0x%p\r\n", ExceptionRecord->ExceptionCode, WinExceptionDescription(ExceptionRecord->ExceptionCode), ExceptionRecord->ExceptionAddress];
 
     	if (ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
     		if (ExceptionRecord->ExceptionInformation[0] == 0)
@@ -119,13 +129,41 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
 void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
-	of_log(@"%@", exception);
+	[of_stderr writeLine:[exception description]];
 	[exception printDebugBacktrace];
 
-	exit(1);
+	if (__winbacktrace_postmortem_debug_enabled) {
+		if ([DrMinGWModule loaded]) {
+
+			if ([DynamoRIOModule loaded]) {
+				DynamoRIOModule* module = [DynamoRIOModule moduleWithContext:NULL];
+
+				OFArray* stack = [module backtraceStackWithDepth:256];
+				
+				OFException* hlp = [OFException exception];
+
+				for (OFDictionary* i in stack){
+					[of_stderr writeLine:[hlp stringFromDebugInfo:i]];
+				}
+
+			}
+		}
+	}
+
+	abort();
 }
 
 @implementation OFException(WinBacktrace)
+
++ (void)enablePostmortemDebug:(bool)yes_no
+{
+	__winbacktrace_postmortem_debug_enabled = yes_no;
+}
+
++ (void)printFullCallStack:(bool)yes_no
+{
+	__winbacktrace_print_full_call_stack = yes_no;
+}
 
 - (void)printDebugBacktrace
 {
@@ -138,63 +176,25 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 	if ((backtrace_ = [self backtraceInfo]) == nil) {
 		backtrace_ = [self backtrace];
 
-		
+		[of_stderr writeFormat:@"\r\n\r\n"];
 
 		for (OFString* stackAddress in backtrace_) {
-			[of_stderr writeFormat:@"[%zu]:%@\r\n", idx, stackAddress];
+			[of_stderr writeFormat:@"%zu %@\r\n", idx, stackAddress];
 			idx++;
 		}
+
+		[of_stderr writeFormat:@"\r\n\r\n"];
 
 		objc_autoreleasePoolPop(pool_);
 		return;
 	}
 
 	OFAutoreleasePool* pool = [OFAutoreleasePool new];
-	OFMutableString* line = nil;
 
 	[of_stderr writeFormat:@"\r\n\r\n"];
 	for (OFDictionary* info in backtrace_) {
-		line = [OFMutableString stringWithFormat:@"[%zu]:0x%p ", idx, [[info objectForKey:kStackAddress] uIntPtrValue]];
-
-		if (![[info objectForKey:kModuleName] isEqual:@"Unknown"])
-			[line appendString:[info objectForKey:kModuleName]];
-		else
-			[line appendUTF8String:"????"];
-
-		[line appendFormat:@"(0x%p)", [[info objectForKey:kModuleAddress] uIntPtrValue]];
-
-		[line appendUTF8String:" "];
-
-		if ([info objectForKey:kDemangledSymbolName])
-			[line appendString:[info objectForKey:kDemangledSymbolName]];
-		else
-			[line appendString:[info objectForKey:kMangledSymbolName]];
-
-		[line appendFormat:@" +0x%p", [[info objectForKey:kModuleOffset] uIntPtrValue]];
-
-		[line appendUTF8String:" "];
-
-		if ([info objectForKey:kSourceFileName]) {
-
-			[line appendUTF8String:"at "];
-
-			[line appendString:[info objectForKey:kSourceFileName]];
-
-			if ([info objectForKey:kLineNumber])
-				[line appendFormat:@":%@", [info objectForKey:kLineNumber]];
-
-		} else if ([info objectForKey:kSourceFilePath]) {
-
-			[line appendUTF8String:"at "];
-
-			[line appendString:[info objectForKey:kSourceFilePath]];
-
-			if ([info objectForKey:kLineNumber])
-				[line appendFormat:@":%@", [info objectForKey:kLineNumber]];
-
-		}
-
-		[of_stderr writeLine:line];
+		
+		[self printDebugInfo:info number:idx];
 
 		[pool releaseObjects];
 		idx++;
@@ -210,12 +210,27 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 - (OFArray *)backtraceInfo
 {
-	if (![DrMinGWModule loaded] || ![DynamoRIOModule loaded])
-		return nil;
-
 	OFArray* info = nil;
 
 	void* pool = objc_autoreleasePoolPush();
+
+	if (![DynamoRIOModule loaded]) {
+		if (![DrMinGWModule loaded])
+			return nil;
+
+		DrMinGWModule* module = [DrMinGWModule moduleWithContext:NULL];
+
+    	info = [module backtraceWithStack:_backtrace depth:OF_BACKTRACE_SIZE];
+
+		[info retain];
+
+		objc_autoreleasePoolPop(pool);
+
+		return [info autorelease];
+
+	}
+
+	
 
 	DynamoRIOModule* module = [DynamoRIOModule module];
 
@@ -226,6 +241,28 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 	objc_autoreleasePoolPop(pool);
 
 	return [info autorelease];
+}
+
+- (void)printDebugInfo:(OFDictionary *)info  number:(size_t)number
+{
+	[of_stderr writeFormat:@"%zu %@\r\n", 
+		number,
+		[self stringFromDebugInfo:info]
+	];
+}
+
+- (OFString *)stringFromDebugInfo:(OFDictionary *)info
+{
+	return [OFString stringWithFormat:@"%@!%@+0x%x  [%@ @ %llu]  (0x%p <%@+0x%p>)", 
+		[[info objectForKey:kModuleName] isEqual:@"Unknown"] ? @"????" : [info objectForKey:kModuleName],
+		([info objectForKey:kDemangledSymbolName] != nil) ? [info objectForKey:kDemangledSymbolName] : ([info objectForKey:kMangledSymbolName] != nil) ? [info objectForKey:kMangledSymbolName] : @"???",
+		(ptrdiff_t)([[info objectForKey:kStackAddress] uIntPtrValue] - [[info objectForKey:kModuleAddress] uIntPtrValue] - [[info objectForKey:kModuleOffset] uIntPtrValue]),
+		([info objectForKey:kSourceFilePath] != nil) ? [info objectForKey:kSourceFilePath] : @"???",
+		([info objectForKey:kLineNumber] != nil) ? [[info objectForKey:kLineNumber] uInt64Value] : 0,
+		[[info objectForKey:kStackAddress] uIntPtrValue],
+		[[info objectForKey:kModuleName] isEqual:@"Unknown"] ? @"????" : [info objectForKey:kModuleName],
+		(ptrdiff_t)([[info objectForKey:kStackAddress] uIntPtrValue] - [[info objectForKey:kModuleAddress] uIntPtrValue])
+	];
 }
 
 
