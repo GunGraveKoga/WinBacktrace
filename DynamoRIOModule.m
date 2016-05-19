@@ -143,8 +143,39 @@ static bool __dynamorio_module_loaded = false;
 		HMODULE hModule = [self moduleHandleFromAddress:(DWORD64)stack[idx]];
 		OFString* moduleName = [self moduleFileNameFromHandle:hModule];
 
-		[addressInfo setObject:[OFNumber numberWithUIntPtr:(uintptr_t)hModule] forKey:kModuleAddress];
+		if (![moduleName isEqual:[OFString stringWithUTF8String:"Unknown"]]) {
 
+			
+
+			[addressInfo setObject:moduleName forKey:kModulePath];
+			[addressInfo setObject:[moduleName lastPathComponent] forKey:kModuleName];
+
+			[addressInfo setObject:[OFNumber numberWithUIntPtr:(uintptr_t)stack[idx]] forKey:kStackAddress];
+			[addressInfo setObject:[OFNumber numberWithUIntPtr:(uintptr_t)hModule] forKey:kModuleAddress];
+
+			ptrdiff_t offset = ((uintptr_t)stack[idx] - (uintptr_t)hModule);
+
+			OFDictionary* stackInfo = [self symbolInfoAtAddress:offset inModule:moduleName];
+
+			if (stackInfo != nil) {
+
+				for (OFString* key in [stackInfo allKeys]) {
+
+					[addressInfo setObject:[stackInfo objectForKey:key] forKey:key];
+
+				}
+			}
+
+			[addressInfo makeImmutable];
+
+			[array addObject:addressInfo];
+
+		}
+
+		addressInfo = [OFMutableDictionary dictionary];
+
+		[addressInfo setObject:[OFNumber numberWithUIntPtr:(uintptr_t)hModule] forKey:kModuleAddress];
+		
 
 		[self setSymbol:(PSYMBOL_INFO)buffer];
 
@@ -206,6 +237,9 @@ static bool __dynamorio_module_loaded = false;
 
 - (OFDictionary *)symbolInfoByName:(OFString *)name inModule:(OFString *)module
 {
+	if (module == nil || [module length] == 0)
+		return nil;
+
 	OFMutableDictionary* result = [OFMutableDictionary dictionary];
 
 	OFAutoreleasePool* pool = [OFAutoreleasePool new];
@@ -240,6 +274,7 @@ static bool __dynamorio_module_loaded = false;
     			[result setObject:file forKey:kSourceFilePath];
     			[result setObject:[file lastPathComponent] forKey:kSourceFileName];
     			[result setObject:[OFNumber numberWithSize:_sym_info.line_offs] forKey:kLineOffset];
+
     		} else if (ret == DRSYM_ERROR_LINE_NOT_AVAILABLE) {
 
     			if (_sym_info.file_available_size > 0) {
@@ -285,6 +320,101 @@ static bool __dynamorio_module_loaded = false;
 	[pool release];
 
 	return nil;
+}
+
+- (OFDictionary *)symbolInfoAtAddress:(ptrdiff_t)offset inModule:(OFString *)module
+{
+	if (module == nil || [module length] == 0)
+		return nil;
+
+	OFMutableDictionary* result = [OFMutableDictionary dictionary];
+
+	OFAutoreleasePool* pool = [OFAutoreleasePool new];
+
+
+	if (drsym_initPtr(NULL) == DRSYM_SUCCESS) {
+
+		char* nameBuffer = (char*)__builtin_alloca(sizeof(char) * (MAX_PATH * 4));
+    	char* fileBuffer = (char*)__builtin_alloca(sizeof(char) * (MAX_PATH * 4));
+
+		memset(&_sym_info, 0, sizeof(_sym_info));
+		memset(nameBuffer, 0, (MAX_PATH * 4) * sizeof(char));
+		memset(fileBuffer, 0, (MAX_PATH * 4) * sizeof(char));
+
+		_sym_info.struct_size = sizeof(_sym_info);
+    	_sym_info.name = nameBuffer;
+    	_sym_info.name_size = (MAX_PATH * 4) * sizeof(char);
+    	_sym_info.file = fileBuffer;
+    	_sym_info.file_size = (MAX_PATH * 4) * sizeof(char);
+
+    	drsym_error_t ret = drsym_lookup_addressPtr([module UTF8String], offset, &_sym_info, DRSYM_DEFAULT_FLAGS);
+
+    	if (ret == DRSYM_SUCCESS) {
+
+    		OFString* filePath = [OFString stringWithUTF8String:_sym_info.file length:_sym_info.file_available_size];
+			OFString* fileName = [filePath lastPathComponent];
+
+			[result setObject:filePath forKey:kSourceFilePath];
+			[result setObject:fileName forKey:kSourceFileName];
+
+			[result setObject:[OFNumber numberWithSize:_sym_info.line_offs] forKey:kLineOffset];
+			[result setObject:[OFNumber numberWithSize:_sym_info.line] forKey:kLineNumber];
+
+    	} 
+    	else if (ret == DRSYM_ERROR_LINE_NOT_AVAILABLE) {
+
+    		if (_sym_info.file_available_size > 0) {
+    			OFString* filePath = [OFString stringWithUTF8String:_sym_info.file length:_sym_info.file_available_size];
+    			OFString* fileName = [filePath lastPathComponent];
+
+    			[result setObject:filePath forKey:kSourceFilePath];
+    			[result setObject:fileName forKey:kSourceFileName];
+    		}
+
+    	} else {
+
+    		[pool release];
+
+    		drsym_exitPtr();
+
+    		return nil;
+    	}
+
+    	[result setObject:[OFNumber numberWithUIntPtr:(uintptr_t)offset] forKey:kModuleOffset];
+    	[result setObject:[OFNumber numberWithSize:_sym_info.start_offs] forKey:kSymbolStartOffset];
+    	[result setObject:[OFNumber numberWithSize:_sym_info.end_offs] forKey:kSymbolEndOffset];
+
+    	if (_sym_info.name_available_size > 0) {
+    		OFString* mangledName = [OFString stringWithUTF8String:_sym_info.name];
+
+    		OFString* demangledName = nil;
+
+    		if ((demangledName = objc_demangle(mangledName)) == nil) {
+
+    			char* demangledBuffer = (char*)__builtin_alloca(sizeof(char) * (MAX_PATH * 4));
+
+    			size_t demangleSize = drsym_demangle_symbolPtr(demangledBuffer, (sizeof(char) * (MAX_PATH * 4)), _sym_info.name, DRSYM_DEFAULT_FLAGS);
+
+    			demangledName = [OFString stringWithUTF8String:demangledBuffer length:demangleSize];
+    		}
+
+
+    		[result setObject:mangledName forKey:kMangledSymbolName];
+    		[result setObject:demangledName forKey:kDemangledSymbolName];
+    	}
+
+    	[pool release];
+
+    	[result makeImmutable];
+
+    	drsym_exitPtr();
+
+    	return result;
+    	
+	}
+
+	return nil;
+
 }
 
 @end

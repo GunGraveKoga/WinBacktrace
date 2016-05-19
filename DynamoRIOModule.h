@@ -21,5 +21,6 @@
 + (bool)loaded;
 
 - (OFDictionary *)symbolInfoByName:(OFString *)name inModule:(OFString *)module;
+- (OFDictionary *)symbolInfoAtAddress:(ptrdiff_t)offset inModule:(OFString *)module;
 
 @end
