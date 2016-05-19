@@ -51,11 +51,12 @@
 
 int main(int argc, char const *argv[])
 {
-	//[OFException(WinBacktrace) enablePostmortemDebug:true];
-	//[OFException printFullCallStack:true];
+	
 
 	WinBacktrace* plugin = [OFPlugin pluginFromFile:@"WinBacktrace"];
 
+	[plugin enablePostmortemDebug:true];
+	[plugin printFullCallStack:true];
 	
 	OFObject* obj = [OFObject new];
 
@@ -63,6 +64,7 @@ int main(int argc, char const *argv[])
 		[OFObject classMethod];
 
 	}@catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
@@ -70,6 +72,7 @@ int main(int argc, char const *argv[])
 		[obj setInt:1 forFloat:5.0];
 
 	}@catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
@@ -77,6 +80,7 @@ int main(int argc, char const *argv[])
 		[obj __test];
 
 	} @catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
@@ -84,26 +88,27 @@ int main(int argc, char const *argv[])
 		[obj OF__internalMethod];
 
 	}@catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
 	@try {
 		[obj incorrectMethodDemangle__];
 	}@catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
 	@try {
 		[OFString stringWithArray:nil];
 	}@catch(OFException* e) {
+		of_log(@"%@", [e description]);
 		[e printDebugBacktrace];
 	}
 
-	//[obj CRTException];
+	[obj CRTException];
 
-	//of_log(@"After exception");
-
-	@throw [OFException exception];
+	//@throw [OFException exception];
 
 
 	return 0;

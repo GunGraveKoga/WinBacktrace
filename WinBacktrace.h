@@ -9,4 +9,10 @@
 
 @interface WinBacktrace: OFPlugin
 
+- (void)enablePostmortemDebug:(bool)yes_no;
+- (void)printFullCallStack:(bool)yes_no;
+
++ (bool)postmortemDebug;
++ (bool)isPrintCallStack;
+
 @end

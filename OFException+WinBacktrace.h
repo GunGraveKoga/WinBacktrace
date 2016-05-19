@@ -7,9 +7,6 @@
 
 @protocol WinBacktrace
 
-+ (void)enablePostmortemDebug:(bool)yes_no;
-+ (void)printFullCallStack:(bool)yes_no;
-
 - (void)printDebugBacktrace;
 - (OFArray *)backtraceInfo;
 - (OFString *)stringFromDebugInfo:(OFDictionary *)info;

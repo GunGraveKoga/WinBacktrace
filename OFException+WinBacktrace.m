@@ -5,10 +5,9 @@
 #import "WinCRTException.h"
 #import "WinCRTException+PRIVATE.h"
 
-#include <inttypes.h>
+#import "WinBacktrace.h"
 
-static bool __winbacktrace_postmortem_debug_enabled = false;
-static bool __winbacktrace_print_full_call_stack = false;
+#include <inttypes.h>
 
 @interface OFException(DebugPrint)
 
@@ -42,7 +41,7 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
     	DynamoRIOModule* module = [DynamoRIOModule moduleWithContext:ContextRecord];
 
-    	if (__winbacktrace_postmortem_debug_enabled)
+    	if ([WinBacktrace postmortemDebug])
     		[module miniDump:info];
 
 		OFArray* stack = [module callectStackWithDepth:OF_BACKTRACE_SIZE];
@@ -72,7 +71,7 @@ LONG WINAPI __WinBacktrace_Exception_Filter(LPEXCEPTION_POINTERS info) {
 
     	DrMinGWModule* module = [DrMinGWModule moduleWithContext:ContextRecord];
 
-    	if (__winbacktrace_postmortem_debug_enabled)
+    	if ([WinBacktrace postmortemDebug])
     		[module miniDump:info];
 
     	OFArray* stack = [module callectStackWithDepth:OF_BACKTRACE_SIZE];
@@ -143,7 +142,17 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 	
 	[backtrace writeFormat:@"%@ %@ GMT+0:\n\n", executableName, [[OFDate date] dateStringWithFormat:dateFormat]];
 	[backtrace writeString:@"========================START=========================\n\n"];
-	[backtrace writeFormat:@"PID %d TID 0x%llx <%@>\n\n", GetCurrentProcessId(), GetCurrentThreadId(), [[OFThread currentThread] name]];
+	if ([exception isKindOfClass:[WinCRTException class]]) {
+
+		[backtrace writeLine:@"Windows CRT exception."];
+		[backtrace writeLine:@"Executable main thread is dead!"];
+		[backtrace writeLine:@"Executable stack is dead!"];
+
+	} else {
+
+		[backtrace writeFormat:@"PID %d TID 0x%llx <%@>\n\n", GetCurrentProcessId(), GetCurrentThreadId(), [[OFThread currentThread] name]];
+
+	}
 	[backtrace writeLine:[exception description]];
 	[backtrace writeString:@"\n\n"];
 	[of_stderr writeString:@"\r\n\r\n"];
@@ -151,6 +160,7 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 	size_t idx = 0;
 	for (OFDictionary* info in stackInfo) {
+		
 		[exception printDebugInfo:info  number:idx];
 
 		[backtrace writeFormat:@"%zu %@\n", idx, [exception stringFromDebugInfo:info]];
@@ -160,7 +170,7 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 	[of_stderr writeString:@"\r\n\r\n"];
 	[backtrace writeString:@"\n\n"];
 
-	if (__winbacktrace_print_full_call_stack) {
+	if ([WinBacktrace isPrintCallStack]) {
 		if ([DrMinGWModule loaded]) {
 
 			[backtrace writeString:@"Stack:\n\n"];
@@ -192,16 +202,6 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 }
 
 @implementation OFException (WinBacktrace)
-
-+ (void)enablePostmortemDebug:(bool)yes_no
-{
-	__winbacktrace_postmortem_debug_enabled = yes_no;
-}
-
-+ (void)printFullCallStack:(bool)yes_no
-{
-	__winbacktrace_print_full_call_stack = yes_no;
-}
 
 - (void)printDebugBacktrace
 {
@@ -291,15 +291,17 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 - (OFString *)stringFromDebugInfo:(OFDictionary *)info
 {
-	return [OFString stringWithFormat:@"%@!%@+0x%x  [%@ @ %llu]  (0x%p <%@+0x%p>)", 
+	return [OFString stringWithFormat:@"%@!%@+0x%x  [%@ @ %llu]  (0x%p <%@+0x%p>) [0x%p - 0x%p]", 
 		[[info objectForKey:kModuleName] isEqual:@"Unknown"] ? @"????" : [info objectForKey:kModuleName],
 		([info objectForKey:kDemangledSymbolName] != nil) ? [info objectForKey:kDemangledSymbolName] : ([info objectForKey:kMangledSymbolName] != nil) ? [info objectForKey:kMangledSymbolName] : @"???",
-		(ptrdiff_t)([[info objectForKey:kStackAddress] uIntPtrValue] - [[info objectForKey:kModuleAddress] uIntPtrValue] - [[info objectForKey:kModuleOffset] uIntPtrValue]),
+		[[info objectForKey:kLineOffset] ptrDiffValue],
 		([info objectForKey:kSourceFilePath] != nil) ? [info objectForKey:kSourceFilePath] : @"???",
 		([info objectForKey:kLineNumber] != nil) ? [[info objectForKey:kLineNumber] uInt64Value] : 0,
 		[[info objectForKey:kStackAddress] uIntPtrValue],
 		[[info objectForKey:kModuleName] isEqual:@"Unknown"] ? @"????" : [info objectForKey:kModuleName],
-		(ptrdiff_t)([[info objectForKey:kStackAddress] uIntPtrValue] - [[info objectForKey:kModuleAddress] uIntPtrValue])
+		[[info objectForKey:kModuleOffset] ptrDiffValue],
+		[[info objectForKey:kSymbolStartOffset] ptrDiffValue],
+		[[info objectForKey:kSymbolEndOffset] ptrDiffValue]
 	];
 }
 
