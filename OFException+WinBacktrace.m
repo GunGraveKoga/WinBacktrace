@@ -153,6 +153,7 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 		[backtrace writeFormat:@"PID %d TID 0x%llx <%@>\n\n", GetCurrentProcessId(), GetCurrentThreadId(), [[OFThread currentThread] name]];
 
 	}
+	
 	[backtrace writeLine:[exception description]];
 	[backtrace writeString:@"\n\n"];
 	[of_stderr writeString:@"\r\n\r\n"];
