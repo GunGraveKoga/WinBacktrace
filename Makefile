@@ -11,7 +11,8 @@ WINBACKTRACE_OBJS = WinBacktrace.plugin.o DrMinGWModule.plugin.o DynamoRIOModule
 WINBACKTRACE_OBJS_LIST := $(addprefix $(build_dir)/,$(WINBACKTRACE_OBJS))
 
 WINBACKTRACE_PUBLIC_HEADERS = DrMinGWModule.h  DynamoRIOModule.h  OFException+WinBacktrace.h \
-								 WinBacktrace.h  WinCRTException.h  macros.h					 			  
+								 WinBacktrace.h  WinCRTException.h  macros.h \
+								 dynamorio_types.h				 			  
 
 CC=i686-w64-mingw32-objfw-compile
 CHDIR=cd
