@@ -150,7 +150,7 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 	} else {
 
-		[backtrace writeFormat:@"PID %d TID 0x%llx <%@>\n\n", GetCurrentProcessId(), GetCurrentThreadId(), [[OFThread currentThread] name]];
+		[backtrace writeFormat:@"PID %d TID 0x%llx\n\n", GetCurrentProcessId(), GetCurrentThreadId()];
 
 	}
 	
@@ -206,7 +206,7 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 - (void)printDebugBacktrace
 {
-	void* pool_ = objc_autoreleasePoolPush();
+	OFAutoreleasePool* pool = [OFAutoreleasePool new];
 
 	OFArray* backtrace_ = nil;
 
@@ -224,11 +224,13 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 
 		[of_stderr writeFormat:@"\r\n\r\n"];
 
-		objc_autoreleasePoolPop(pool_);
+		[pool release];
 		return;
 	}
 
-	OFAutoreleasePool* pool = [OFAutoreleasePool new];
+
+	
+	[backtrace_ retain];
 
 	[of_stderr writeFormat:@"\r\n\r\n"];
 	for (OFDictionary* info in backtrace_) {
@@ -238,12 +240,12 @@ void __WinBacktrace_Uncaught_Exception_Handler(id exception) {
 		[pool releaseObjects];
 		idx++;
 	}
-
+	[backtrace_ autorelease];
 	[pool release];
 
 	[of_stderr writeFormat:@"\r\n\r\n"];
 
-	objc_autoreleasePoolPop(pool_);
+	
 	return;
 }
 
